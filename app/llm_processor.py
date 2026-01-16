@@ -525,15 +525,16 @@ class DemoRetriever:
             similar_ix = np.argsort(similarity_matrix[doc_id])[::-1]
 
             for ix in similar_ix:
-                if ix == doc_id:
+                if ix == doc_id: #karena exclude diri sendiri
                     continue
 
-                for doc in documents:
-                    if doc[0] == documents_df.iloc[ix]["documents"]:
+                for doc in documents: #buat search filename nya 
+                    if doc[0] == documents_df.iloc[ix]["documents"]: 
                         docs.append((doc, similarity_matrix[doc_id][ix]))
 
             return docs
 
+        # isinya (text, filename)
         documents = []
 
         demo_path_parts = self.config.demoSet.split("/")
@@ -547,6 +548,8 @@ class DemoRetriever:
         documents_df = pd.DataFrame(
             [doc[0] for doc in documents], columns=["documents"]
         )
+
+        # place to KNN retriever
         stop_words_l = stopwords.words("english")
         documents_df["documents_cleaned"] = documents_df.documents.apply(
             lambda x: " ".join(
@@ -558,7 +561,7 @@ class DemoRetriever:
         tfidfvectoriser = TfidfVectorizer()
         tfidfvectoriser.fit(documents_df.documents_cleaned)
         tfidf_vectors = tfidfvectoriser.transform(documents_df.documents_cleaned)
-        pairwise_similarities = np.dot(tfidf_vectors, tfidf_vectors.T).toarray()
+        pairwise_similarities = np.dot(tfidf_vectors, tfidf_vectors.T).toarray() # hasil kali dot atau cosine similarty
         top_k = most_similar(0, pairwise_similarities)[:k]
 
         if permutation == "desc":

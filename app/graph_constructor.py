@@ -9,7 +9,9 @@ from omegaconf import DictConfig
 from pyvis.network import Network
 from scipy.spatial.distance import cosine
 from utils.http_server_utils import get_current_port
-
+import networkx as nx
+from pyvis.network import Network
+import os
 
 class Linker:
     def __init__(self, config: DictConfig):
@@ -468,3 +470,60 @@ def create_graph_visualization(result: dict) -> str:
         print(f"Error saving graph: {e}")
 
     return f"http://localhost:{http_port}/{file_name}", file_path
+
+class GraphConstructor:
+    def __init__(self):
+        self.graph = nx.DiGraph()
+
+    def add_triplets(self, triplets):
+        """
+        Menambahkan triplet ke dalam graf.
+        Format triplet diharapkan: [{'head': '...', 'relation': '...', 'tail': '...'}, ...]
+        """
+        self.graph.clear() # Bersihkan graf lama sebelum proses baru
+        for triplet in triplets:
+            # Sesuaikan key di bawah ini dengan output JSON dari LLM Anda
+            # Biasanya: 'source', 'relation', 'target' ATAU 'subject', 'predicate', 'object'
+            source = triplet.get('head') or triplet.get('source') or triplet.get('subject')
+            target = triplet.get('tail') or triplet.get('target') or triplet.get('object')
+            relation = triplet.get('relation') or triplet.get('predicate') or triplet.get('type')
+
+            if source and target:
+                self.graph.add_node(source, title=source, color='#97c2fc') # Warna biru muda
+                self.graph.add_node(target, title=target, color='#fb9a99') # Warna merah muda
+                self.graph.add_edge(source, target, title=relation, label=relation)
+
+    def generate_interactive_graph(self, filename="knowledge_graph.html"):
+        """
+        Membuat file HTML visualisasi graf interaktif
+        """
+        if self.graph.number_of_nodes() == 0:
+            return None
+        
+        # Inisialisasi Pyvis Network
+        net = Network(height="600px", width="100%", bgcolor="#222222", font_color="white", directed=True)
+        net.from_nx(self.graph)
+        
+        # Opsi fisika agar graf menyebar dengan rapi
+        net.set_options("""
+        var options = {
+          "physics": {
+            "barnesHut": {
+              "gravitationalConstant": -8000,
+              "springLength": 250
+            }
+          }
+        }
+        """)
+        
+        # Simpan ke folder static agar bisa diakses Gradio
+        output_dir = "app/static"
+        os.makedirs(output_dir, exist_ok=True)
+        output_path = os.path.join(output_dir, filename)
+        net.save_graph(output_path)
+        
+        # Baca konten file untuk dirender di Gradio
+        with open(output_path, 'r', encoding='utf-8') as f:
+            html_content = f.read()
+            
+        return html_content

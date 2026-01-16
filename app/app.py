@@ -7,6 +7,11 @@ import traceback
 from graph_constructor import create_graph_visualization
 from utils.gradio_utils import build_interface, run_pipeline
 from utils.http_server_utils import setup_http_server
+import gradio as gr
+import os
+from pypdf import PdfReader
+from app.cti_processor import CTIProcessor
+from app.graph_constructor import GraphConstructor
 from utils.model_utils import (
     MODELS,
     check_api_key,
@@ -230,3 +235,85 @@ if __name__ == "__main__":
     setup_http_server()
 
     main()
+
+# Inisialisasi Modul
+processor = CTIProcessor()
+graph_constructor = GraphConstructor()
+
+def extract_text_from_pdf(file_obj):
+    """Fungsi helper untuk membaca teks dari PDF"""
+    try:
+        reader = PdfReader(file_obj.name)
+        text = ""
+        for page in reader.pages:
+            text += page.extract_text() + "\n"
+        return text
+    except Exception as e:
+        return f"Error reading PDF: {str(e)}"
+
+def process_input(input_text, input_file, model_name):
+    # 1. Cek apakah user upload file. Jika ya, prioritas pakai isi file.
+    if input_file is not None:
+        extracted_text = extract_text_from_pdf(input_file)
+        # Jika teks terlalu panjang, ambil 4000 karakter pertama (agar tidak error token limit)
+        input_text = extracted_text[:8000] if len(extracted_text) > 8000 else extracted_text
+
+    if not input_text:
+        return "Mohon masukkan teks atau upload PDF.", None
+
+    # 2. Proses Ekstraksi Triplet menggunakan LLM
+    # (Pastikan CTIProcessor di cti_processor.py Anda mengembalikan list triplet)
+    triplets = processor.process(input_text, model_name)
+    
+    # 3. Konstruksi Graf
+    graph_constructor.add_triplets(triplets)
+    
+    # 4. Generate Visualisasi HTML
+    html_graph = graph_constructor.generate_interactive_graph()
+    
+    # Kembalikan string JSON (untuk tab Text) dan HTML (untuk tab Visualisasi)
+    import json
+    json_output = json.dumps(triplets, indent=2)
+    
+    if html_graph is None:
+        html_graph = "<div style='color:white'>Tidak ada relasi yang ditemukan untuk divisualisasikan.</div>"
+        
+    return json_output, html_graph
+
+# --- Setup UI Gradio ---
+with gr.Blocks(theme=gr.themes.Soft()) as demo:
+    gr.Markdown("# 🛡️ CTINexus: Automated Threat Intelligence Graph")
+    
+    with gr.Row():
+        with gr.Column(scale=1):
+            # Input Area
+            input_text = gr.Textbox(lines=10, label="Input CTI Report (Text)", placeholder="Paste report here...")
+            input_file = gr.File(label="Or Upload CTI Report (PDF)", file_types=[".pdf"])
+            
+            # Model Selection (Sesuaikan dengan config Anda)
+            model_dropdown = gr.Dropdown(
+                choices=["gpt-3.5-turbo", "gpt-4", "local-model"], 
+                value="gpt-3.5-turbo", 
+                label="Select Model"
+            )
+            
+            submit_btn = gr.Button("🚀 Extract Knowledge Graph", variant="primary")
+            
+        with gr.Column(scale=2):
+            # Output Area dengan Tabs
+            with gr.Tabs():
+                with gr.TabItem("🕸️ Interactive Graph"):
+                    # Komponen HTML untuk render pyvis
+                    graph_output = gr.HTML(label="Knowledge Graph Visualization")
+                with gr.TabItem("📄 JSON Triples"):
+                    json_output = gr.Code(language="json", label="Extracted Entities & Relations")
+
+    # Event Handler
+    submit_btn.click(
+        fn=process_input,
+        inputs=[input_text, input_file, model_dropdown],
+        outputs=[json_output, graph_output]
+    )
+
+if __name__ == "__main__":
+    demo.launch(server_name="0.0.0.0", server_port=7860, share=True)
